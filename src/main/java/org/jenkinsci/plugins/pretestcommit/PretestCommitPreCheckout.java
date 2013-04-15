@@ -12,12 +12,10 @@ import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.Descriptor;
 import hudson.model.Cause.LegacyCodeCause;
+import hudson.model.Descriptor.FormException;
 import hudson.model.Computer;
 
 import hudson.model.*;
-import hudson.plugins.mercurial.HgExe;
-import hudson.plugins.mercurial.MercurialInstallation;
-import hudson.plugins.mercurial.MercurialSCM;
 import hudson.plugins.mercurial.*;
 import hudson.tasks.BuildWrapper;
 import hudson.tasks.BuildTrigger;
@@ -36,14 +34,24 @@ import java.util.List;
 import java.util.Map;
 
 
+import net.sf.json.JSONObject;
+
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.StaplerRequest;
 
 public class PretestCommitPreCheckout extends BuildWrapper {
+	
+	private final String stageRepositoryUrl;
 
 	@DataBoundConstructor
-	public PretestCommitPreCheckout() {
+	public PretestCommitPreCheckout(String stageRepositoryUrl) {
+		this.stageRepositoryUrl = stageRepositoryUrl;
 	}
 
+	public String getStageRepositoryUrl() {
+		return stageRepositoryUrl;
+	}
+	
 	/**
 	 * Finds the hg executable on the system. This method is  taken from MercurialSCM where it is private
 	 * @param node
@@ -248,14 +256,49 @@ public class PretestCommitPreCheckout extends BuildWrapper {
 			BuildListener listener) throws IOException, InterruptedException {
 		listener.getLogger().println("Pre-checkout!!!");
 	}
-	/*
+	
+	/**
+	 * 
+	 * @author rel
+	 *
+	 */
 	@Extension
 	public static final class DescriptorImpl extends Descriptor<BuildWrapper> {
+		
+
+		private String stageRepositoryUrl; //Location of the local repository
+		
+		public DescriptorImpl(){
+			load();
+		}
+		
 		public String getDisplayName() {
-			return "Run pretest-commit stuff before SCM runs";
+			return "Use pretested commits";
+		}
+		
+		/**
+		 * Invoked when "save" is hit. 
+		 */
+		
+		public boolean configure(StaplerRequest req, JSONObject formData) 
+				throws FormException {
+			// To persist global configuration information,
+			// set that to properties and call save().
+			stageRepositoryUrl = formData.getString("stageRepositoryUrl");
+			
+			//We now have the url - we should initialise the repository if it does not yet exist
+			
+			// ^Can also use req.bindJSON(this, formData);
+			//	(easier when there are many fields; need set* methods for this, like setUseFrench)
+			save();
+			return super.configure(req,formData);
+		}
+		
+		public String getStageRepositoryUrl(){
+			return stageRepositoryUrl;
 		}
 	}
-	*/
+	
 	class NoopEnv extends Environment {
 	}
 }
