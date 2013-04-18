@@ -18,11 +18,14 @@ import hudson.model.Computer;
 import hudson.model.*;
 import hudson.plugins.mercurial.*;
 import hudson.tasks.BuildWrapper;
+import hudson.tasks.BuildWrapperDescriptor;
 import hudson.tasks.BuildTrigger;
 import hudson.tasks.BuildStep;
 import hudson.util.ArgumentListBuilder;
+import hudson.util.FormValidation;
 import hudson.FilePath;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.OutputStream;
@@ -33,10 +36,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import javax.servlet.ServletException;
+
+import org.ini4j.InvalidFileFormatException;
+import org.ini4j.Ini;
+import org.jenkinsci.plugins.pretestcommit.HelloWorldBuilder.DescriptorImpl;
 
 import net.sf.json.JSONObject;
 
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 
 public class PretestCommitPreCheckout extends BuildWrapper {
@@ -52,8 +61,13 @@ public class PretestCommitPreCheckout extends BuildWrapper {
 		return stageRepositoryUrl;
 	}
 	
+
+	
+
+	
 	/**
-	 * Finds the hg executable on the system. This method is  taken from MercurialSCM where it is private
+	 * Finds the hg executable on the system. This method is  
+	 * taken from MercurialSCM where it is private
 	 * @param node
 	 * @param listener
 	 * @param allowDebug
@@ -257,45 +271,148 @@ public class PretestCommitPreCheckout extends BuildWrapper {
 		listener.getLogger().println("Pre-checkout!!!");
 	}
 	
+	@Override
+	public DescriptorImpl getDescriptor() {
+		return (DescriptorImpl)super.getDescriptor();
+	}
+	
 	/**
 	 * 
 	 * @author rel
 	 *
 	 */
 	@Extension
-	public static final class DescriptorImpl extends Descriptor<BuildWrapper> {
+	public static final class DescriptorImpl extends BuildWrapperDescriptor {
 		
-
 		private String stageRepositoryUrl; //Location of the local repository
-		
-		public DescriptorImpl(){
-			load();
-		}
 		
 		public String getDisplayName() {
 			return "Use pretested commits";
 		}
 		
 		/**
+		 * Gets the configuration directory for a repository
+		 * @param repositoryUrl
+		 * @return
+		 */
+		public File configurationDirectory(final String repositoryUrl){
+			return new File(repositoryUrl, ".hg");
+		}
+		
+		/**
+		 * Tests whether a repository exists at the specified location
+		 * @assert That repositoryUrl is a local repository the user has access to
+		 */
+		public boolean validateConfiguration(final String repositoryUrl) {
+			File repoDir = configurationDirectory(repositoryUrl);
+			//We should check whether the hgrc file is correctly configured 
+			//and that the python hook file is properly set
+			//That the repository exists is good enough for now
+			return repoDir.exists();
+		}
+		
+		/**
+		 * Updates the configuration file in the specified repository and creates 
+		 * the hook file as well
+		 * @param repositoryUrl
+		 */
+		public boolean updateConfiguration(final String repositoryUrl) {
+			File repoDir = configurationDirectory(repositoryUrl);
+			if(repoDir.exists() || repoDir.mkdirs()){
+				System.out.println("Writing the hgrc file!");
+				//the hgDir now is a valid path
+				//Write the hgrc file
+				try {
+					File hgrc = new File(repoDir,"hgrc");
+					if(hgrc.canWrite() || hgrc.createNewFile()){
+					Ini ini = new Ini(hgrc);
+					System.out.println("Ini file is opened");
+					ini.put("hooks","changegroup", 
+							"python:.hg/hg_change_group_hook.py:run");
+					System.out.println("The hook is made");
+					ini.store();
+					System.out.println("And written");
+					//Copy over the python file
+
+					String jenkinsHome = System.getenv("JENKINS_HOME");	
+					System.out.println(jenkinsHome);
+						return true;
+					} else {
+						return false;
+					}
+				} catch(InvalidFileFormatException e) {
+					System.out.println("Invalid file format");
+				} catch(IOException e) {	
+					System.out.println("Some ioxception occured");
+				}
+			}
+			return false;
+		}
+		
+		/**
+		 * Performs a validation test whether the repository url is correctly 
+		 * initialised
+		 */
+		public FormValidation doTestRepository(
+				@QueryParameter("stageRepositoryUrl") final String repositoryUrl) 
+						throws IOException, ServletException {
+			boolean isValid = validateConfiguration(repositoryUrl);
+			if(isValid) {
+				return FormValidation.ok("The repository is configured correctly");
+			} else {
+				return FormValidation.error("The repository is not valid");
+			}
+		}
+		
+		/**
+		 * Updates or creates the repository url to be functional
+		 * @param repositoryUrl
+		 * @return
+		 */
+		public FormValidation doUpdateRepository(@QueryParameter("stageRepositoryUrl") final String repositoryUrl) {
+			boolean updateResult = updateConfiguration(repositoryUrl);
+			if(updateResult){
+				return FormValidation.ok("Configuration updated");
+			}
+			return FormValidation.error("Configuration could not be updated");
+		}
+		
+		/**
 		 * Invoked when "save" is hit. 
 		 */
 		
+		@Override
 		public boolean configure(StaplerRequest req, JSONObject formData) 
 				throws FormException {
 			// To persist global configuration information,
 			// set that to properties and call save().
-			stageRepositoryUrl = formData.getString("stageRepositoryUrl");
-			
+			//stageRepositoryUrl = "Some static string!";//formData.getString("stageRepositoryUrl");
+			//System.out.println("Inside configure");
 			//We now have the url - we should initialise the repository if it does not yet exist
-			
+			//but only if it is on the local machine...
+		/*	String hgDirName = stageRepositoryUrl + "/.hg";
+			final File hgDir = new File(hgDirName);
+			if(hgDir.exists() || hgDir.mkdirs()){
+				
+			} else {
+				//We could not create directory.. big trouble
+			}
+			*/
 			// ^Can also use req.bindJSON(this, formData);
 			//	(easier when there are many fields; need set* methods for this, like setUseFrench)
 			save();
-			return super.configure(req,formData);
+			return false;//super.configure(req,formData);
 		}
 		
+		
 		public String getStageRepositoryUrl(){
-			return stageRepositoryUrl;
+			return "Foobar"; ///stageRepositoryUrl;
+		}
+
+		@Override
+		public boolean isApplicable(AbstractProject<?, ?> arg0) {
+			// TODO Auto-generated method stub
+			return true;
 		}
 	}
 	
